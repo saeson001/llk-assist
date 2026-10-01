@@ -90,6 +90,8 @@ class CaptureService : Service() {
     private var lastBoardSig: FloatArray? = null
     private var pixels2: IntArray? = null
     private var planStableRetries = 0
+    // 规划期连续无可用帧计数（画面静止/投影无输出时避免无声卡死）
+    private var nullFrames = 0
     private var gestureFails = 0
     private var aiConfigLogged = false
     private var prevObservedSum = -1L
@@ -147,7 +149,13 @@ class CaptureService : Service() {
         LlkLog.init(this)
         LlkDir.ensureConfigTemplate(this)
         loadButtonCalibration()
-        LlkLog.write("lifecycle", "服务启动，工作目录 ${LlkDir.describe(this)}")
+        // 日志带版本号：不同 build 的日志可区分（此前排障时无法确认用户装的是哪版）
+        val ver = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+        } catch (_: Exception) {
+            "?"
+        }
+        LlkLog.write("lifecycle", "服务启动 v$ver，工作目录 ${LlkDir.describe(this)}")
         installCrashLogger()
         startForegroundWithType()
     }
@@ -512,6 +520,7 @@ class CaptureService : Service() {
                     null
                 }
                 if (img != null) {
+                    nullFrames = 0
                     try {
                         val w = img.width
                         val h = img.height
@@ -534,6 +543,23 @@ class CaptureService : Service() {
                         }
                     } finally {
                         img.close()
+                    }
+                } else if (phase == AutoPhase.PLANNING && ep == apEpoch) {
+                    // 画面完全静止时虚拟屏可能不推新帧（acquireLatestImage 为 null）。
+                    // 若就此沉默，状态机会卡死在 PLANNING 且日志无任何输出（1.9.14 实测）：
+                    // 记日志并短暂重试，连续多次仍无帧才停下提示
+                    nullFrames++
+                    if (nullFrames >= 20) {
+                        nullFrames = 0
+                        phase = AutoPhase.IDLE
+                        autoPlay = false
+                        status("自动消｜录屏无画面输出，已停止（请重新点\"启动\"授权录屏）")
+                        LlkLog.write("play", "连续 20 次无可用帧，已停止")
+                    } else {
+                        if (nullFrames == 1) LlkLog.write("play", "规划期无可用帧（画面静止或投影未输出），等待中…")
+                        workHandler.postDelayed({
+                            if (ep == apEpoch && phase == AutoPhase.PLANNING) runFullCycle(force = true, ep)
+                        }, 300)
                     }
                 }
             } finally {
@@ -599,6 +625,9 @@ class CaptureService : Service() {
             emptyRounds = 0
             // 纯开关：按下就保持“开”，条件不满足时在状态行显示原因并等待，不回弹
             if (GameWatchService.instance == null) {
+                // 1.9.14 教训：这条等待路径此前不写日志——更新 APK 后无障碍被系统重置，
+                // 用户按开关后日志 24 秒空白，看起来像"完全不工作"却无从排查
+                LlkLog.write("toggle", "无障碍未连接：开关保持开启并等待（此期间不会执行任何点击）")
                 status("自动消｜已开启，等待无障碍服务连接…")
                 return
             }
@@ -858,7 +887,9 @@ class CaptureService : Service() {
     fun onA11yConnected() {
         mainHandler.post {
             status("自动消｜无障碍已连接")
-            if (autoPlay && phase == AutoPhase.IDLE) {
+            val willResume = autoPlay && phase == AutoPhase.IDLE
+            LlkLog.write("toggle", "无障碍已连接${if (willResume) "，续启自动消" else ""}")
+            if (willResume) {
                 workHandler.post { startAutoPlayLoop() }
             }
         }
