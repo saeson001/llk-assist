@@ -106,8 +106,9 @@ class CaptureService : Service() {
     private var seqIdx = 0
     private var seqDet: BoardDetector.Detection? = null
     private var emptyRounds = 0
-    // 上轮实际规划的块数 / 规划签名 / 连续无效果轮数（块数突变检查、卡死检测）
+    // 上轮实际规划的块数 / 上一帧识别块数 / 规划签名 / 连续无效果轮数（块数突变检查、卡死检测）
     private var lastPlanTileCount = 0
+    private var lastSeenTileCount = 0
     private var lastPlanSig: String? = null
     private var stallRounds = 0
     // 自动消代际令牌：开关切换/进入新一轮时 +1。所有异步回调持有发起时的 epoch，
@@ -699,7 +700,18 @@ class CaptureService : Service() {
         val mp = mode?.key?.split("x")?.takeIf { mode.value >= 3 && it.size == 2 }
         val mainGridDiff = mp != null && (det.rows != mp[0].toInt() || det.cols != mp[1].toInt())
         val tooFewTiles = mp != null && cnt < mp[0].toInt() * mp[1].toInt() * 0.5f
-        val tileJump = lastPlanTileCount > 0 && kotlin.math.abs(cnt - lastPlanTileCount) > lastPlanTileCount * 0.3f
+        // c) 块数突增 >30%（如 28→48 重填）不立即规划。注意只看增加方向：
+        //    消除导致的减块（48→28）是正常结果——若拦减块会死锁（lastPlanTileCount
+        //    只在规划成功时更新，等待中永不更新 → 1.9.17/1.9.18 实锤每轮消完卡
+        //    20+ 秒直到重填，用户体感"识别率不如 1.9.15"）
+        var tileJump = lastPlanTileCount > 0 && cnt > lastPlanTileCount &&
+                (cnt - lastPlanTileCount) > lastPlanTileCount * 0.3f
+        if (tileJump && cnt == lastSeenTileCount) {
+            // 连续两帧块数一致：重填已完成，接受新块数继续（否则基准永不更新再陷死锁）
+            lastPlanTileCount = cnt
+            tileJump = false
+        }
+        lastSeenTileCount = cnt
         if (votes < 2 || mainGridDiff || tooFewTiles || tileJump) {
             gridWaits++
             if (gridWaits >= 10) {
@@ -715,7 +727,7 @@ class CaptureService : Service() {
                 val why = when {
                     votes < 2 -> "网格未确认（${det.rows}x${det.cols} 首见）"
                     mainGridDiff || tooFewTiles -> "当前误识别 ${det.rows}x${det.cols} $cnt 块"
-                    else -> "块数突变 $lastPlanTileCount→$cnt（重填中）"
+                    else -> "块数突增 $lastPlanTileCount→$cnt（重填中）"
                 }
                 status("自动消｜等待棋盘稳定（$why）")
                 workHandler.postDelayed({
