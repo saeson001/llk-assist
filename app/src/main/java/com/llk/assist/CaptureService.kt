@@ -111,6 +111,8 @@ class CaptureService : Service() {
     private var lastSeenTileCount = 0
     private var lastPlanSig: String? = null
     private var stallRounds = 0
+    // 上轮识别发生在重填之后（新棋盘不计入"块数未降"判断）
+    private var lastRoundWasRefill = false
     // 自动消代际令牌：开关切换/进入新一轮时 +1。所有异步回调持有发起时的 epoch，
     // 执行时若 ≠ 当前值说明此链已被新流取代，直接放弃——
     // 根治"两条规划/执行流并发"（日志实锤：200ms 内两次规划、同一坐标 70ms 内被点两次，
@@ -709,6 +711,7 @@ class CaptureService : Service() {
         if (tileJump && cnt == lastSeenTileCount) {
             // 连续两帧块数一致：重填已完成，接受新块数继续（否则基准永不更新再陷死锁）
             lastPlanTileCount = cnt
+            lastRoundWasRefill = true
             tileJump = false
         }
         lastSeenTileCount = cnt
@@ -818,11 +821,16 @@ class CaptureService : Service() {
             return
         }
         emptyRounds = 0
-        // 每轮最多 10 对：游戏在消除约 1/3 时会重新填充，长序列在重填后会全部过期
-        seqQueue = OnetSolver(det.rows, det.cols, ids, true).solveSequence(48).take(10)
+        // 每轮对数上限自适应（1.9.19 日志实锤：块数少/空洞多时点击有效率暴跌——
+        // 34 块规划 10 对只消 1 对，无效 10 连击还会在游戏端留下一堆残留选中）：
+        // 上轮点击后块数没降（基本无效）→ 本轮只试 3 对快速验证；
+        // 重填后的新棋盘不适用（块数增加属正常，仍然 10 对）
+        val cap = if (!lastRoundWasRefill && lastPlanTileCount > 0 && det.tileCount() >= lastPlanTileCount) 3 else 10
+        seqQueue = OnetSolver(det.rows, det.cols, ids, true).solveSequence(48).take(cap)
         seqIdx = 0
         seqDet = det
         lastPlanTileCount = det.tileCount()
+        lastRoundWasRefill = false
         // 卡死检测：连续多轮"同一模型、同一序列"且点击无效——多为游戏端存在残留
         // 选中的方块（半选中状态下再点=取消选中，怎么点都不消，1.9.16 日志
         // 00:04:11 起 34 块反复规划点击不变实锤），停止并给用户可操作提示
