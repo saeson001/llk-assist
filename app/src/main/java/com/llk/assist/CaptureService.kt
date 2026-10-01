@@ -703,21 +703,26 @@ class CaptureService : Service() {
         if (votes < 2 || mainGridDiff || tooFewTiles || tileJump) {
             gridWaits++
             if (gridWaits >= 10) {
-                phase = AutoPhase.IDLE
-                autoPlay = false
-                status("自动消｜棋盘长时间不稳定，已停止")
+                // 等待上限不再停止（1.9.17 缺陷：棋盘形状随消除/重填变化，如 8x6 消成
+                // 7x6 再重填回 8x6，票仓最大者锁死新形状 → 无限等待 → 静默停止，
+                // 用户只能反复开关，00:28 会话实锤）。改为清空票仓重新学习，
+                // 以当前连续识别到的网格为主，继续走稳定门规划
+                gridWaits = 0
+                gridCounts.clear()
+                gridCounts["${det.rows}x${det.cols}"] = 3
+                LlkLog.write("play", "网格长期不一致，重置网格学习：以当前 ${det.rows}x${det.cols} $cnt 块为主")
+            } else {
+                val why = when {
+                    votes < 2 -> "网格未确认（${det.rows}x${det.cols} 首见）"
+                    mainGridDiff || tooFewTiles -> "当前误识别 ${det.rows}x${det.cols} $cnt 块"
+                    else -> "块数突变 $lastPlanTileCount→$cnt（重填中）"
+                }
+                status("自动消｜等待棋盘稳定（$why）")
+                workHandler.postDelayed({
+                    if (ep == apEpoch && phase == AutoPhase.PLANNING) runFullCycle(force = true, ep)
+                }, 700)
                 return
             }
-            val why = when {
-                votes < 2 -> "网格未确认（${det.rows}x${det.cols} 首见）"
-                mainGridDiff || tooFewTiles -> "当前误识别 ${det.rows}x${det.cols} $cnt 块"
-                else -> "块数突变 $lastPlanTileCount→$cnt（重填中）"
-            }
-            status("自动消｜等待棋盘稳定（$why）")
-            workHandler.postDelayed({
-                if (ep == apEpoch && phase == AutoPhase.PLANNING) runFullCycle(force = true, ep)
-            }, 700)
-            return
         }
         gridWaits = 0
         // 稳定门：方块掉落/重新填充动画期间建模必然错位（用户反馈"填充后继续旧路径、
@@ -761,6 +766,7 @@ class CaptureService : Service() {
                     if (planStableRetries >= 8) {
                         phase = AutoPhase.IDLE
                         autoPlay = false
+                        LlkLog.write("play", "连续 8 次稳定门未通过，已停止")
                         status("自动消｜棋盘持续变化，已停止")
                         return@post
                     }
@@ -789,6 +795,7 @@ class CaptureService : Service() {
             if (emptyRounds >= 6) {
                 phase = AutoPhase.IDLE
                 autoPlay = false
+                LlkLog.write("play", "连续 6 轮无可消对，已停止")
                 status("自动消｜连续 6 轮无可消对，已停止")
                 return
             }
@@ -969,6 +976,7 @@ class CaptureService : Service() {
                 if (detectFails >= 5) {
                     phase = AutoPhase.IDLE
                     autoPlay = false
+                    LlkLog.write("play", "连续 5 次识别失败，已停止")
                     status("自动消｜连续识别失败，已停止")
                 } else {
                     status("自动消｜识别失败，重试第 $detectFails 次")
