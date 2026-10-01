@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="green_board">#66BB6A</color>
+    <color name="bg_soft">#F2F6EF</color>
+    <color name="text_dark">#333333</color>
+</resources>

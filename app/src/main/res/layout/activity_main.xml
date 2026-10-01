@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_soft">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/app_name"
+            android:textColor="@color/text_dark"
+            android:textSize="24sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="识别连连看棋盘，自动找出当前可以直接连线消除的方块对（连线最多折两次），并把连线画在悬浮窗里。全部在本机完成，不联网。"
+            android:textColor="@color/text_dark"
+            android:textSize="14sp"/>
+
+        <Button
+            android:id="@+id/btn_start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="启动（录屏 + 悬浮提示）"
+            android:textSize="16sp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="使用前检查"
+            android:textColor="@color/text_dark"
+            android:textSize="16sp"
+            android:textStyle="bold"/>
+
+        <Button
+            android:id="@+id/btn_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="悬浮窗权限"/>
+
+        <Button
+            android:id="@+id/btn_a11y"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="无障碍服务"/>
+
+        <Button
+            android:id="@+id/btn_storage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="文件权限（日志/缓存目录）"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="AI 接口（可选，用于复核识别）"
+            android:textColor="@color/text_dark"
+            android:textSize="16sp"
+            android:textStyle="bold"/>
+
+        <EditText
+            android:id="@+id/ai_base"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:hint="接口地址，如 https://api.xxx.com/v1"
+            android:inputType="textUri"
+            android:textSize="13sp"/>
+
+        <EditText
+            android:id="@+id/ai_key"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="API Key"
+            android:inputType="textPassword"
+            android:textSize="13sp"/>
+
+        <EditText
+            android:id="@+id/ai_model"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="模型名（需支持图片输入）"
+            android:inputType="text"
+            android:textSize="13sp"/>
+
+        <CheckBox
+            android:id="@+id/ai_enabled"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="启用 AI 校验（每次“识别”后自动复核）"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/ai_save"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="保存配置"/>
+
+            <Button
+                android:id="@+id/ai_test"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="测试连接"/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/ai_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/text_dark"
+            android:textSize="13sp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="使用方法"
+            android:textColor="@color/text_dark"
+            android:textSize="16sp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:lineSpacingExtra="4dp"
+            android:text="1. 点“启动”，在系统弹窗里允许录屏。\n2. 屏幕上会出现一个小控制面板，可拖动。\n3. 进入游戏棋盘界面，点面板上的“识别”，或打开“自动”模式（每秒刷新，画面不变时不闪）。\n4. 配对的两个方块会标上相同编号的圆牌，按编号找两块即可。\n5. 打开“自动消”后，程序会通过无障碍服务自动点击配对方块完成消除（需先开启无障碍服务）。"
+            android:textColor="@color/text_dark"
+            android:textSize="14sp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="版本 1.9.14"
+            android:textColor="#999999"
+            android:textSize="12sp"/>
+    </LinearLayout>
+</ScrollView>

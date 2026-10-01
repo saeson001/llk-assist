@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.llk.assist'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.llk.assist"
+        minSdk 26
+        targetSdk 33
+        versionCode 38
+        versionName "1.9.14"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // release 块默认无签名=unsigned 包装不上（1.9.12 教训）；
+            // 统一用 debug 签名，与历次交付的签名一致，可直接覆盖安装
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    // 成品文件名固定为 llkzs_版本号.apk，升版本自动跟随
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            outputFileName = "llkzs_${variant.versionName}.apk"
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation project(':core')
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+}
