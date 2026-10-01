@@ -320,6 +320,11 @@ class CaptureService : Service() {
             setTextColor(0xFFFFFFFF.toInt())
             textSize = 12f
             text = "初始化..."
+            // 面板尺寸恒定（用户要求）：状态文字固定单行、超宽省略，
+            // 宽度略小于按钮行 → 面板大小完全由按钮行决定，不再随提示文字变大变小
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(dp(185), LinearLayout.LayoutParams.WRAP_CONTENT)
         }
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -814,46 +819,63 @@ class CaptureService : Service() {
         }
     }
 
+    /** 单步异常的安全兜底：写主日志（含堆栈）并停下状态机，不让异常带崩整个进程。 */
+    private fun execCrashStop(t: Throwable) {
+        LlkLog.write("crash", "自动消执行异常（已安全停止，进程未退出）：${android.util.Log.getStackTraceString(t)}")
+        apEpoch++
+        phase = AutoPhase.IDLE
+        autoPlay = false
+        status("自动消｜内部异常已停止（详情见日志）")
+    }
+
     private fun execStep(ep: Int) {
         if (ep != apEpoch) return
-        if (phase != AutoPhase.EXECUTING || !autoPlay) {
-            finishExecution(ep)
-            return
+        try {
+            if (phase != AutoPhase.EXECUTING || !autoPlay) {
+                finishExecution(ep)
+                return
+            }
+            if (seqIdx >= seqQueue.size) {
+                finishExecution(ep)
+                return
+            }
+            val det = seqDet
+            val a11y = GameWatchService.instance
+            if (det == null || a11y == null) {
+                finishExecution(ep)
+                return
+            }
+            val h = seqQueue[seqIdx]
+            // 点击坐标 = bbox 几何中心（与圆牌位置一致，稳定居中）
+            val ca = det.cells[h.a.r * det.cols + h.a.c]
+            val cb = det.cells[h.b.r * det.cols + h.b.c]
+            if (ca == null || cb == null) {
+                seqIdx++
+                execStep(ep)
+                return
+            }
+            val ax = (ca.x0 + ca.x1) / 2f
+            val ay = (ca.y0 + ca.y1) / 2f
+            val bx = (cb.x0 + cb.x1) / 2f
+            val by = (cb.y0 + cb.y1) / 2f
+            mainHandler.post { overlay?.flashTap(ax, ay) }
+            a11y.tap(ax, ay)
+            workHandler.postDelayed({
+                try {
+                    if (ep != apEpoch || phase != AutoPhase.EXECUTING) return@postDelayed
+                    mainHandler.post { overlay?.flashTap(bx, by) }
+                    a11y.tap(bx, by)
+                    seqIdx++
+                    mainHandler.post { status("自动消｜消除 第${seqIdx}/${seqQueue.size}对") }
+                    // 双击间隔 250ms + 对间隔 450ms：兼顾可靠性与速度
+                    workHandler.postDelayed({ execStep(ep) }, 450)
+                } catch (t: Throwable) {
+                    execCrashStop(t)
+                }
+            }, 250)
+        } catch (t: Throwable) {
+            execCrashStop(t)
         }
-        if (seqIdx >= seqQueue.size) {
-            finishExecution(ep)
-            return
-        }
-        val det = seqDet
-        val a11y = GameWatchService.instance
-        if (det == null || a11y == null) {
-            finishExecution(ep)
-            return
-        }
-        val h = seqQueue[seqIdx]
-        // 点击坐标 = bbox 几何中心（与圆牌位置一致，稳定居中）
-        val ca = det.cells[h.a.r * det.cols + h.a.c]
-        val cb = det.cells[h.b.r * det.cols + h.b.c]
-        if (ca == null || cb == null) {
-            seqIdx++
-            execStep(ep)
-            return
-        }
-        val ax = (ca.x0 + ca.x1) / 2f
-        val ay = (ca.y0 + ca.y1) / 2f
-        val bx = (cb.x0 + cb.x1) / 2f
-        val by = (cb.y0 + cb.y1) / 2f
-        mainHandler.post { overlay?.flashTap(ax, ay) }
-        a11y.tap(ax, ay)
-        workHandler.postDelayed({
-            if (ep != apEpoch || phase != AutoPhase.EXECUTING) return@postDelayed
-            mainHandler.post { overlay?.flashTap(bx, by) }
-            a11y.tap(bx, by)
-            seqIdx++
-            mainHandler.post { status("自动消｜消除 第${seqIdx}/${seqQueue.size}对") }
-            // 双击间隔 250ms + 对间隔 450ms：兼顾可靠性与速度
-            workHandler.postDelayed({ execStep(ep) }, 450)
-        }, 250)
     }
 
     private fun finishExecution(ep: Int) {

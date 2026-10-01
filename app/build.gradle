@@ -11,8 +11,8 @@ android {
         applicationId "com.llk.assist"
         minSdk 26
         targetSdk 33
-        versionCode 39
-        versionName "1.9.15"
+        versionCode 40
+        versionName "1.9.16"
     }
 
     buildTypes {
