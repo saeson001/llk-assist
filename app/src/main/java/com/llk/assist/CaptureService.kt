@@ -106,6 +106,10 @@ class CaptureService : Service() {
     private var seqIdx = 0
     private var seqDet: BoardDetector.Detection? = null
     private var emptyRounds = 0
+    // 上轮实际规划的块数 / 规划签名 / 连续无效果轮数（块数突变检查、卡死检测）
+    private var lastPlanTileCount = 0
+    private var lastPlanSig: String? = null
+    private var stallRounds = 0
     // 自动消代际令牌：开关切换/进入新一轮时 +1。所有异步回调持有发起时的 epoch，
     // 执行时若 ≠ 当前值说明此链已被新流取代，直接放弃——
     // 根治"两条规划/执行流并发"（日志实锤：200ms 内两次规划、同一坐标 70ms 内被点两次，
@@ -683,29 +687,37 @@ class CaptureService : Service() {
             }, 1500)
             return
         }
-        // 幻影帧过滤：消除/填充动画中的错帧会识别出错误网格（如 5x4、3x4、9x10）。
-        // 只在本局出现次数最多的网格（真实棋盘）上规划，其余帧等待稳定后重试。
+        // 幻影帧过滤 v2：消除/填充/加载动画中的错帧会识别出错误网格。
+        // a) 首见网格（仅 1 票）不允许规划——开局加载/掉落动画的错帧（如 5x4）常常是
+        //    第一次成功识别就出现，旧逻辑要主流网格 >=3 票才生效，首帧直接放行
+        //    （1.9.16 日志 00:03:16 实锤：在 5x4 上规划 10 对，20 击全废）
+        // b) 已有主流网格（>=3 票）时，异网格或块数不足其一半 → 等待（原逻辑）
+        // c) 与上一轮规划块数差 >30%：正在掉落/重新填充（如 48→28），等一拍再识别
+        val cnt = det.tileCount()
+        val votes = gridCounts["${det.rows}x${det.cols}"] ?: 0
         val mode = gridCounts.maxByOrNull { it.value }
-        if (mode != null && mode.value >= 3) {
-            val parts = mode.key.split("x")
-            val mRows = parts[0].toInt()
-            val mCols = parts[1].toInt()
-            val gridMismatch = det.rows != mRows || det.cols != mCols
-            val tooFewTiles = det.tileCount() < mRows * mCols * 0.5f
-            if (gridMismatch || tooFewTiles) {
-                gridWaits++
-                if (gridWaits >= 10) {
-                    phase = AutoPhase.IDLE
-                    autoPlay = false
-                    status("自动消｜棋盘长时间不稳定，已停止")
-                    return
-                }
-                status("自动消｜等待棋盘稳定（当前误识别 ${det.rows}x${det.cols} ${det.tileCount()}块）")
-                workHandler.postDelayed({
-                    if (ep == apEpoch && phase == AutoPhase.PLANNING) runFullCycle(force = true, ep)
-                }, 700)
+        val mp = mode?.key?.split("x")?.takeIf { mode.value >= 3 && it.size == 2 }
+        val mainGridDiff = mp != null && (det.rows != mp[0].toInt() || det.cols != mp[1].toInt())
+        val tooFewTiles = mp != null && cnt < mp[0].toInt() * mp[1].toInt() * 0.5f
+        val tileJump = lastPlanTileCount > 0 && kotlin.math.abs(cnt - lastPlanTileCount) > lastPlanTileCount * 0.3f
+        if (votes < 2 || mainGridDiff || tooFewTiles || tileJump) {
+            gridWaits++
+            if (gridWaits >= 10) {
+                phase = AutoPhase.IDLE
+                autoPlay = false
+                status("自动消｜棋盘长时间不稳定，已停止")
                 return
             }
+            val why = when {
+                votes < 2 -> "网格未确认（${det.rows}x${det.cols} 首见）"
+                mainGridDiff || tooFewTiles -> "当前误识别 ${det.rows}x${det.cols} $cnt 块"
+                else -> "块数突变 $lastPlanTileCount→$cnt（重填中）"
+            }
+            status("自动消｜等待棋盘稳定（$why）")
+            workHandler.postDelayed({
+                if (ep == apEpoch && phase == AutoPhase.PLANNING) runFullCycle(force = true, ep)
+            }, 700)
+            return
         }
         gridWaits = 0
         // 稳定门：方块掉落/重新填充动画期间建模必然错位（用户反馈"填充后继续旧路径、
@@ -767,6 +779,10 @@ class CaptureService : Service() {
     /** 稳定门通过后：规划序列（每轮最多 10 对，限制重填后的过期深度）→ 暂停/直接 → 执行。 */
     private fun planAndExecute(det: BoardDetector.Detection, ids: IntArray, ep: Int) {
         if (ep != apEpoch) return
+        // 同代单飞：同一时刻只允许一条链从 PLANNING 进入执行——"开开关"链与手动"识别"
+        // 按钮链可持有同一 epoch，代际令牌拦不住它们并发，必须靠 phase 互斥
+        // （1.9.16 日志 00:04:25.905/.973 两次规划、同坐标 68ms 双击实锤）
+        if (phase != AutoPhase.PLANNING) return
         val hints = lastLocal
         if (hints.isEmpty()) {
             emptyRounds++
@@ -787,6 +803,23 @@ class CaptureService : Service() {
         seqQueue = OnetSolver(det.rows, det.cols, ids, true).solveSequence(48).take(10)
         seqIdx = 0
         seqDet = det
+        lastPlanTileCount = det.tileCount()
+        // 卡死检测：连续多轮"同一模型、同一序列"且点击无效——多为游戏端存在残留
+        // 选中的方块（半选中状态下再点=取消选中，怎么点都不消，1.9.16 日志
+        // 00:04:11 起 34 块反复规划点击不变实锤），停止并给用户可操作提示
+        val first = seqQueue.firstOrNull()
+        val planSig = "${det.tileCount()}:${seqQueue.size}:${first?.a?.r},${first?.a?.c}"
+        if (planSig == lastPlanSig) stallRounds++ else stallRounds = 0
+        lastPlanSig = planSig
+        if (stallRounds >= 3) {
+            stallRounds = 0
+            lastPlanSig = null
+            phase = AutoPhase.IDLE
+            autoPlay = false
+            LlkLog.write("play", "连续 3 轮规划无效果，已停止（疑似游戏存在残留选中方块）")
+            status("自动消｜连续点击无效果已停止：请手动点掉一两组方块复位，再开自动消")
+            return
+        }
         LlkLog.write("play", "规划序列 ${seqQueue.size} 对")
 
         if (pauseCalibrated) {
