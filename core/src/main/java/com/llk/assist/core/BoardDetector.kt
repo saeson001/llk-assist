@@ -68,6 +68,10 @@ object BoardDetector {
     var lastFailReason: String = ""
         private set
 
+    // 上一次成功识别的格点（残局复用：块少时行列信息不足，网格一经确定不会变化）
+    private var lastColLat: Lattice? = null
+    private var lastRowLat: Lattice? = null
+
     private fun fail(reason: String): Detection? {
         lastFailReason = reason
         return null
@@ -243,12 +247,17 @@ object BoardDetector {
         if (comps.isEmpty()) return fail("棋盘内无方块连通域")
         val maxArea = comps.maxOf { it.area }
         val cand = comps.filter { it.area > maxArea * 0.12f }
-        if (cand.size < 8) return fail("候选方块过少 ${cand.size}")
+        // 残局支持：块少是合法状态（最后几块时 cand/tiles 天然 <8、覆盖率天然 <20%），
+        // 有历史格点缓存时不再因"过少/覆盖率"拒绝，格点拟合失败则复用缓存网格——
+        // 网格一经确定不会变化，1.9.20 日志实锤残局 8 块被"覆盖率过低"拒收，
+        // 最后两块只能手点
+        val endgame = cand.size < 8 && lastColLat != null && lastRowLat != null
+        if (cand.size < 8 && !endgame) return fail("候选方块过少 ${cand.size}")
         val medArea = median(cand.map { it.area.toFloat() })
         // 注意：不再要求方块数为偶数——个别组件异常变奇数时直接否决会整体失败，
         // 奇偶性由 TileClassifier 的回收步骤利用游戏规则修复
         val tiles = cand.filter { it.area >= medArea * 0.40f && it.area <= medArea * 1.9f }
-        if (tiles.size < 8) {
+        if (tiles.size < 8 && !endgame) {
             return fail("面积过滤后方块过少 tiles=${tiles.size} cand=${cand.size} medArea=$medArea")
         }
         val tileW = median(tiles.map { it.wd.toFloat() })
@@ -260,15 +269,23 @@ object BoardDetector {
         // 完整格点阵，可补出中间缺失的空行/空列，并把噪声平均掉。
         val colClusters = clusterCenters(tiles.map { it.cx }.sorted(), tileW * 0.5f)
         val rowClusters = clusterCenters(tiles.map { it.cy }.sorted(), tileH * 0.5f)
-        if (colClusters.size < 2 || rowClusters.size < 2) return fail("行列聚类过少")
-        val colLat = fitLattice(colClusters) ?: return fail("列格点拟合失败")
-        val rowLat = fitLattice(rowClusters) ?: return fail("行格点拟合失败")
+        var colLat = if (colClusters.size >= 2) fitLattice(colClusters) else null
+        var rowLat = if (rowClusters.size >= 2) fitLattice(rowClusters) else null
+        if (endgame && (colLat == null || rowLat == null)) {
+            // 残局块太少拉不出行列等差：直接复用上次成功的格点
+            colLat = lastColLat
+            rowLat = lastRowLat
+        }
+        if (colLat == null) return fail("列格点拟合失败")
+        if (rowLat == null) return fail("行格点拟合失败")
         val cols = colLat.centers.size
         val rows = rowLat.centers.size
         if (cols !in 3..10 || rows !in 3..14) {
             return fail("行列数异常 rows=$rows cols=$cols")
         }
-        if (tiles.size < rows * cols * 0.2f) {
+        // 覆盖率下限只在无历史格点时启用（首次学习防幻影帧拟合假网格）；
+        // 有缓存后残局低覆盖是合法状态
+        if (tiles.size < rows * cols * 0.2f && lastColLat == null) {
             return fail("覆盖率过低 tiles=${tiles.size} grid=${rows}x$cols")
         }
         val pitchX = colLat.pitch
@@ -344,6 +361,8 @@ object BoardDetector {
         val bb = slot.values.maxOf { it.y1 }
         // 必须传格点中心（尺寸与 rows/cols 一致）；传原始聚类数组会造成
         // “列数与中心表不一致”，后续平移/绘制/点击都会越界
+        lastColLat = colLat
+        lastRowLat = rowLat
         return Detection(rows, cols, bl, bt, br, bb, cells, colLat.centers, rowLat.centers, pitchX, pitchY)
     }
 

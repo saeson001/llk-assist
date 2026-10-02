@@ -992,18 +992,13 @@ class CaptureService : Service() {
             LlkLog.write("detect", "失败：$reason")
             detectFails++
             if (phase == AutoPhase.PLANNING) {
-                // 规划阶段的识别失败（消除/填格动画过渡）：直接重试
-                if (detectFails >= 5) {
-                    phase = AutoPhase.IDLE
-                    autoPlay = false
-                    LlkLog.write("play", "连续 5 次识别失败，已停止")
-                    status("自动消｜连续识别失败，已停止")
-                } else {
-                    status("自动消｜识别失败，重试第 $detectFails 次")
-                    workHandler.postDelayed({
-                        if (ep == apEpoch && phase == AutoPhase.PLANNING) runFullCycle(force = true, ep)
-                    }, 600)
-                }
+                // 规划阶段的识别失败（消除/填格动画过渡）是常态：持续重试、不再设停止上限——
+                // 1.9.20 日志实锤"连败 5 次即停止"把一局打断 6 次，用户被迫反复重开开关；
+                // 离开棋盘界面时用户关开关即可，无需代劳
+                status("自动消｜识别失败，重试第 $detectFails 次")
+                workHandler.postDelayed({
+                    if (ep == apEpoch && phase == AutoPhase.PLANNING) runFullCycle(force = true, ep)
+                }, 600)
                 return false
             }
             mainHandler.post {
