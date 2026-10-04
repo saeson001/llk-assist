@@ -749,7 +749,11 @@ class CaptureService : Service() {
         val mode = gridCounts.maxByOrNull { it.value }
         val mp = mode?.key?.split("x")?.takeIf { mode.value >= 3 && it.size == 2 }
         val mainGridDiff = mp != null && (det.rows != mp[0].toInt() || det.cols != mp[1].toInt())
-        val tooFewTiles = mp != null && cnt < mp[0].toInt() * mp[1].toInt() * 0.5f
+        // tooFewTiles 的 50% 容量下限只在尚无规划历史时启用（开局防幻影网格）；
+        // 有历史后中局/残局的合法减块会被它误拦
+        // （1.9.22 日志 20:33:41 实锤：30→22 块合法中局连等 4 拍逼用户重开）
+        val tooFewTiles = mp != null && lastPlanTileCount == 0 &&
+                cnt < mp[0].toInt() * mp[1].toInt() * 0.5f
         // c) 块数突增 >30%（如 28→48 重填）不立即规划。注意只看增加方向：
         //    消除导致的减块（48→28）是正常结果——若拦减块会死锁（lastPlanTileCount
         //    只在规划成功时更新，等待中永不更新 → 1.9.17/1.9.18 实锤每轮消完卡
@@ -870,11 +874,13 @@ class CaptureService : Service() {
             return
         }
         emptyRounds = 0
-        // 每轮对数上限自适应（1.9.19 日志实锤：块数少/空洞多时点击有效率暴跌——
-        // 34 块规划 10 对只消 1 对，无效 10 连击还会在游戏端留下一堆残留选中）：
-        // 上轮点击后块数没降（基本无效）→ 本轮只试 3 对快速验证；
-        // 重填后的新棋盘不适用（块数增加属正常，仍然 10 对）
-        val cap = if (!lastRoundWasRefill && lastPlanTileCount > 0 && det.tileCount() >= lastPlanTileCount) 3 else 10
+        // 每轮对数上限自适应：块数少（空洞多）时点击有效率暴跌
+        // （1.9.22 日志 20:35:23 实锤：38 块规划 10 对只消 1 对 38→36，改善仅 5%；
+        //   旧条件"块数完全没降"让这种低改善轮次继续空放 10 对）。
+        // 改用改善率：消除改善不足 15% → 本轮只试 3 对快速验证；
+        // 重填后的新棋盘不适用（块数增加属正常，仍 10 对）
+        val cap = if (!lastRoundWasRefill && lastPlanTileCount > 0 &&
+            det.tileCount() >= lastPlanTileCount * 0.85f) 3 else 10
         seqQueue = OnetSolver(det.rows, det.cols, ids, true).solveSequence(48).take(cap)
         seqIdx = 0
         seqDet = det
