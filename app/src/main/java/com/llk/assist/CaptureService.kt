@@ -360,6 +360,7 @@ class CaptureService : Service() {
             overlay?.visibility = if (showPaths) View.VISIBLE else View.GONE
         }
         row2.addView(btnPath)
+        row2.addView(mkBtn("日志") { shareLog() })
         row2.addView(mkBtn("退出") { stopSelf() })
         root.addView(statusText)
         root.addView(row)
@@ -402,6 +403,53 @@ class CaptureService : Service() {
     private fun status(s: String) {
         // 任意线程都可调用：统一切主线程更新面板文字
         mainHandler.post { statusText?.text = s }
+    }
+
+    /**
+     * 通过系统分享导出当天日志（微信/QQ/蓝牙等任意接收方）。
+     * 此前用户要手动在文件管理器里翻 LLKZS/logs 再拷贝，三次发错文件；
+     * 有 FileProvider 授权后一键分享，文件名带版本号便于排障对版。
+     */
+    private fun shareLog() {
+        val f = LlkLog.currentFile()
+        if (f == null) {
+            mainHandler.post {
+                Toast.makeText(this, "今天的日志还没有内容", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "$packageName.fileprovider", f
+            )
+            val ver = try {
+                packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+            } catch (_: Exception) {
+                "?"
+            }
+            LlkLog.write("lifecycle", "分享日志：${f.name}（${f.length()} 字节，v$ver）")
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(
+                    Intent.EXTRA_SUBJECT,
+                    "llkzs 日志 v$ver"
+                )
+                putExtra(
+                    Intent.EXTRA_TEXT,
+                    "连连看助手 v$ver 日志（${f.name}），用于问题排查"
+                )
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(Intent.createChooser(intent, "分享日志").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        } catch (e: Exception) {
+            LlkLog.write("lifecycle", "分享日志失败：${e.message}")
+            mainHandler.post {
+                Toast.makeText(this, "分享失败：${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     // ---------- 抓帧与分析 ----------
@@ -732,6 +780,7 @@ class CaptureService : Service() {
                     mainGridDiff || tooFewTiles -> "当前误识别 ${det.rows}x${det.cols} $cnt 块"
                     else -> "块数突增 $lastPlanTileCount→$cnt（重填中）"
                 }
+                LlkLog.write("play", "等待棋盘稳定：$why")
                 status("自动消｜等待棋盘稳定（$why）")
                 workHandler.postDelayed({
                     if (ep == apEpoch && phase == AutoPhase.PLANNING) runFullCycle(force = true, ep)

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 存储根目录模式：环境根目录/LLKZS/logs/log-*.log -->
+    <external-path name="llkzs_root" path="LLKZS/"/>
+    <!-- 应用专属目录模式：/sdcard/Android/data/com.llk.assist/files/LLKZS/logs -->
+    <external-files-path name="llkzs_app" path="LLKZS/"/>
+</paths>

@@ -33,4 +33,12 @@ object LlkLog {
         } catch (_: Exception) {
         }
     }
+
+    /** 当天日志文件（分享导出用；不存在返回 null）。 */
+    @Synchronized
+    fun currentFile(): File? {
+        val d = dir ?: return null
+        val f = File(d, "log-${dateFmt.format(Date())}.log")
+        return if (f.exists()) f else null
+    }
 }
