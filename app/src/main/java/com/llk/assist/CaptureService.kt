@@ -617,6 +617,9 @@ class CaptureService : Service() {
                         LlkLog.write("play", "连续 20 次无可用帧，已停止")
                     } else {
                         if (nullFrames == 1) LlkLog.write("play", "规划期无可用帧（画面静止或投影未输出），等待中…")
+                        // 等待期间面板持续提示（20:48 会话实锤：24 秒长重填期间面板文字
+                        // 停留在上一阶段，用户不知道程序在等什么而重开开关）
+                        status("自动消｜等待画面（重填动画或已离开棋盘）${nullFrames}/20")
                         workHandler.postDelayed({
                             if (ep == apEpoch && phase == AutoPhase.PLANNING) runFullCycle(force = true, ep)
                         }, 300)
